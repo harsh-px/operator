@@ -1591,6 +1591,18 @@ func TestUpdateClusterStatusForNodes(t *testing.T) {
 		DataIp:            "10.0.2.1",
 		MgmtIp:            "10.0.2.2",
 		Status:            api.Status_STATUS_OK,
+		Pools: []*api.StoragePool{
+			{
+				ID:        0,
+				TotalSize: 21474836480,
+				Used:      10737418240,
+			},
+			{
+				ID:        1,
+				TotalSize: 21474836480,
+				Used:      2147483648,
+			},
+		},
 	}
 	expectedNodeEnumerateResp := &api.SdkNodeEnumerateWithFiltersResponse{
 		Nodes: []*api.StorageNode{expectedNodeOne, expectedNodeTwo},

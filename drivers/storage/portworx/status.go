@@ -16,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -108,7 +109,7 @@ func (p *portworx) updateStorageNodes(
 
 		currentPxNodes[node.SchedulerNodeName] = true
 
-		storageNode, err := p.updateStorageNodeSpec(cluster, node)
+		storageNode, err := p.createOrUpdateStorageNode(cluster, node)
 		if err != nil {
 			msg := fmt.Sprintf("Failed to update StorageNode for nodeID %v: %v", node.Id, err)
 			p.warningEvent(cluster, util.FailedSyncReason, msg)
@@ -205,7 +206,7 @@ func (p *portworx) updateRemainingStorageNodes(
 	return nil
 }
 
-func (p *portworx) updateStorageNodeSpec(
+func (p *portworx) createOrUpdateStorageNode(
 	cluster *corev1alpha1.StorageCluster,
 	node *api.StorageNode,
 ) (*corev1alpha1.StorageNode, error) {
@@ -263,6 +264,20 @@ func (p *portworx) updateStorageNodeStatus(
 		Type:   corev1alpha1.NodeStateCondition,
 		Status: mapNodeStatus(node.Status),
 	}
+
+	var (
+		totalSizeInBytes, usedSizeInBytes int64
+	)
+
+	for _, pool := range node.Pools {
+		totalSizeInBytes += int64(pool.TotalSize)
+		usedSizeInBytes += int64(pool.Used)
+	}
+	storageNode.Status.Storage = corev1alpha1.StorageStatus{
+		TotalSize: *resource.NewQuantity(totalSizeInBytes, resource.BinarySI),
+		UsedSize:  *resource.NewQuantity(usedSizeInBytes, resource.BinarySI),
+	}
+
 	operatorops.Instance().UpdateStorageNodeCondition(&storageNode.Status, nodeStateCondition)
 	storageNode.Status.Phase = getStorageNodePhase(&storageNode.Status)
 

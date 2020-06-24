@@ -59,6 +59,12 @@ spec:
                   type: string
                 mgmtIP:
                   type: string
+            storage:
+              properties:
+                totalSize:
+                  type: string
+                usedSize:
+                  type: string
             conditions:
               properties:
                 type:

@@ -56,7 +56,7 @@ func (c *Controller) syncStork(
 		if err == nil {
 			if err := c.setupStork(cluster); err != nil {
 				msg := fmt.Sprintf("Failed to setup Stork. %v", err)
-				c.warningEvent(cluster, util.FailedComponentReason, msg)
+				k8sutil.WarningEvent(c.recorder, cluster, util.FailedComponentReason, msg)
 			}
 			return nil
 		}
@@ -64,7 +64,7 @@ func (c *Controller) syncStork(
 	}
 	if err := c.removeStork(cluster); err != nil {
 		msg := fmt.Sprintf("Failed to cleanup Stork. %v", err)
-		c.warningEvent(cluster, util.FailedComponentReason, msg)
+		k8sutil.WarningEvent(c.recorder, cluster, util.FailedComponentReason, msg)
 	}
 	return nil
 }

@@ -49,7 +49,6 @@ func TestRegisterCRD(t *testing.T) {
 	apiextensionsops.SetInstance(apiextensionsops.New(fakeExtClient))
 	group := corev1alpha1.SchemeGroupVersion.Group
 	storageClusterCRDName := corev1alpha1.StorageClusterResourcePlural + "." + group
-	storageNodeCRDName := corev1alpha1.StorageNodeResourcePlural + "." + group
 
 	// When the CRDs are created, just updated their status so the validation
 	// does not get stuck until timeout.
@@ -57,11 +56,6 @@ func TestRegisterCRD(t *testing.T) {
 		err := testutil.ActivateCRDWhenCreated(fakeExtClient, storageClusterCRDName)
 		require.NoError(t, err)
 	}()
-	go func() {
-		err := testutil.ActivateCRDWhenCreated(fakeExtClient, storageNodeCRDName)
-		require.NoError(t, err)
-	}()
-
 	controller := Controller{}
 
 	// Should fail if the CRD specs are not found
@@ -83,7 +77,7 @@ func TestRegisterCRD(t *testing.T) {
 		CustomResourceDefinitions().
 		List(metav1.ListOptions{})
 	require.NoError(t, err)
-	require.Len(t, crds.Items, 2)
+	require.Len(t, crds.Items, 1)
 
 	crd, err := fakeExtClient.ApiextensionsV1beta1().
 		CustomResourceDefinitions().
@@ -107,25 +101,6 @@ func TestRegisterCRD(t *testing.T) {
 	require.Equal(t, subresource, crd.Spec.Subresources)
 	require.NotEmpty(t, crd.Spec.Validation.OpenAPIV3Schema.Properties)
 
-	crd, err = fakeExtClient.ApiextensionsV1beta1().
-		CustomResourceDefinitions().
-		Get(storageNodeCRDName, metav1.GetOptions{})
-	require.NoError(t, err)
-	require.Equal(t, storageNodeCRDName, crd.Name)
-	require.Equal(t, corev1alpha1.SchemeGroupVersion.Group, crd.Spec.Group)
-	require.Len(t, crd.Spec.Versions, 1)
-	require.Equal(t, corev1alpha1.SchemeGroupVersion.Version, crd.Spec.Versions[0].Name)
-	require.True(t, crd.Spec.Versions[0].Served)
-	require.True(t, crd.Spec.Versions[0].Storage)
-	require.Equal(t, apiextensionsv1beta1.NamespaceScoped, crd.Spec.Scope)
-	require.Equal(t, corev1alpha1.StorageNodeResourceName, crd.Spec.Names.Singular)
-	require.Equal(t, corev1alpha1.StorageNodeResourcePlural, crd.Spec.Names.Plural)
-	require.Equal(t, reflect.TypeOf(corev1alpha1.StorageNode{}).Name(), crd.Spec.Names.Kind)
-	require.Equal(t, reflect.TypeOf(corev1alpha1.StorageNodeList{}).Name(), crd.Spec.Names.ListKind)
-	require.Equal(t, []string{corev1alpha1.StorageNodeShortName}, crd.Spec.Names.ShortNames)
-	require.Equal(t, subresource, crd.Spec.Subresources)
-	require.NotEmpty(t, crd.Spec.Validation.OpenAPIV3Schema.Properties)
-
 	// If CRDs are already present, then should not fail
 	err = controller.RegisterCRD()
 	require.NoError(t, err)
@@ -134,60 +109,8 @@ func TestRegisterCRD(t *testing.T) {
 		CustomResourceDefinitions().
 		List(metav1.ListOptions{})
 	require.NoError(t, err)
-	require.Len(t, crds.Items, 2)
+	require.Len(t, crds.Items, 1)
 	require.Equal(t, storageClusterCRDName, crds.Items[0].Name)
-	require.Equal(t, storageNodeCRDName, crds.Items[1].Name)
-}
-
-func TestRegisterCRDShouldRemoveNodeStatusCRD(t *testing.T) {
-	nodeStatusCRDName := fmt.Sprintf("%s.%s",
-		storageNodeStatusPlural,
-		corev1alpha1.SchemeGroupVersion.Group,
-	)
-	nodeStatusCRD := &apiextensionsv1beta1.CustomResourceDefinition{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: nodeStatusCRDName,
-		},
-	}
-	fakeClient := fakek8sclient.NewSimpleClientset()
-	fakeExtClient := fakeextclient.NewSimpleClientset(nodeStatusCRD)
-	coreops.SetInstance(coreops.New(fakeClient))
-	apiextensionsops.SetInstance(apiextensionsops.New(fakeExtClient))
-	crdBaseDir = func() string {
-		return "../../../deploy/crds"
-	}
-	defer func() {
-		crdBaseDir = getCRDBasePath
-	}()
-
-	group := corev1alpha1.SchemeGroupVersion.Group
-	storageClusterCRDName := corev1alpha1.StorageClusterResourcePlural + "." + group
-	storageNodeCRDName := corev1alpha1.StorageNodeResourcePlural + "." + group
-
-	// When the CRDs are created, just updated their status so the validation
-	// does not get stuck until timeout.
-	go func() {
-		err := testutil.ActivateCRDWhenCreated(fakeExtClient, storageClusterCRDName)
-		require.NoError(t, err)
-	}()
-	go func() {
-		err := testutil.ActivateCRDWhenCreated(fakeExtClient, storageNodeCRDName)
-		require.NoError(t, err)
-	}()
-
-	controller := Controller{}
-
-	err := controller.RegisterCRD()
-	require.NoError(t, err)
-
-	crds, err := fakeExtClient.ApiextensionsV1beta1().
-		CustomResourceDefinitions().
-		List(metav1.ListOptions{})
-	require.NoError(t, err)
-	require.Len(t, crds.Items, 2)
-	for _, crd := range crds.Items {
-		require.NotEqual(t, nodeStatusCRDName, crd.Name)
-	}
 }
 
 func TestKubernetesVersionValidation(t *testing.T) {
@@ -794,6 +717,7 @@ func TestStorageNodeGetsCreated(t *testing.T) {
 	require.Empty(t, result)
 	require.Empty(t, recorder.Events)
 
+	defaultQuantity, _ := resource.ParseQuantity("0")
 	expectedStorageNode1 := &corev1alpha1.StorageNode{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            k8sNode1.Name,
@@ -803,6 +727,10 @@ func TestStorageNodeGetsCreated(t *testing.T) {
 		},
 		Status: corev1alpha1.NodeStatus{
 			Phase: string(corev1alpha1.NodeInitStatus),
+			Storage: corev1alpha1.StorageStatus{
+				TotalSize: defaultQuantity,
+				UsedSize:  defaultQuantity,
+			},
 		},
 	}
 	expectedStorageNode2 := expectedStorageNode1.DeepCopy()
