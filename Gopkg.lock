@@ -508,6 +508,14 @@
   version = "v1.2"
 
 [[projects]]
+  digest = "1:9e1d37b58d17113ec3cb5608ac0382313c5b59470b94ed97d0976e69c7022314"
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "614d223910a179a466c1767a985424175c39b465"
+  version = "v0.9.1"
+
+[[projects]]
   digest = "1:0028cb19b2e4c3112225cd871870f2d9cf49b9b4276531f03438a88e94be86fe"
   name = "github.com/pmezard/go-difflib"
   packages = ["difflib"]
@@ -1397,6 +1405,18 @@
   revision = "21c4ce38f2a793ec01e925ddc31216500183b773"
 
 [[projects]]
+  digest = "1:091322e5af94d021a181fb37b29e85889430697aa9ee49532c043b898c6568b3"
+  name = "sigs.k8s.io/cluster-api"
+  packages = [
+    "api/v1alpha2",
+    "errors",
+    "pkg/apis/deprecated/v1alpha1",
+  ]
+  pruneopts = "UT"
+  revision = "2263f4150985e453f4bdd943830dea0b231d61c6"
+  version = "v0.2.11"
+
+[[projects]]
   digest = "1:8e9f3bb68b141efd1a4687e89d44c664ddd85349f19889c4eaaa3e6274785491"
   name = "sigs.k8s.io/controller-runtime"
   packages = [
@@ -1459,6 +1479,7 @@
     "github.com/libopenstorage/cloudops/pkg/parser",
     "github.com/libopenstorage/cloudops/specs/decisionmatrix",
     "github.com/libopenstorage/openstorage/api",
+    "github.com/libopenstorage/openstorage/pkg/auth",
     "github.com/libopenstorage/openstorage/pkg/dbg",
     "github.com/libopenstorage/openstorage/pkg/grpcserver",
     "github.com/operator-framework/operator-sdk/pkg/metrics",
@@ -1481,6 +1502,7 @@
     "github.com/urfave/cli",
     "google.golang.org/grpc",
     "google.golang.org/grpc/credentials",
+    "google.golang.org/grpc/metadata",
     "google.golang.org/grpc/reflection",
     "gopkg.in/yaml.v2",
     "k8s.io/api/apps/v1",
@@ -1518,6 +1540,7 @@
     "k8s.io/client-go/tools/cache",
     "k8s.io/client-go/tools/record",
     "k8s.io/client-go/util/flowcontrol",
+    "k8s.io/cloud-provider/volume/helpers",
     "k8s.io/code-generator/cmd/client-gen",
     "k8s.io/code-generator/cmd/deepcopy-gen/args",
     "k8s.io/code-generator/cmd/defaulter-gen/args",
@@ -1536,6 +1559,7 @@
     "k8s.io/kubernetes/pkg/util/hash",
     "k8s.io/kubernetes/staging/src/k8s.io/sample-controller/pkg/signals",
     "k8s.io/utils/integer",
+    "sigs.k8s.io/cluster-api/api/v1alpha2",
     "sigs.k8s.io/controller-runtime/pkg/client",
     "sigs.k8s.io/controller-runtime/pkg/client/fake",
     "sigs.k8s.io/controller-runtime/pkg/controller",

@@ -103,3 +103,7 @@ required = [
   name = "k8s.io/code-generator"
   unused-packages = false
   go-tests = false
+
+[[constraint]]
+  name = "sigs.k8s.io/cluster-api"
+  version = "0.2.11"
