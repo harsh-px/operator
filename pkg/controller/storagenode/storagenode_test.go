@@ -1,19 +1,26 @@
 package storagenode
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/golang/mock/gomock"
 	corev1alpha1 "github.com/libopenstorage/operator/pkg/apis/core/v1alpha1"
 	testutil "github.com/libopenstorage/operator/pkg/util/test"
 	apiextensionsops "github.com/portworx/sched-ops/k8s/apiextensions"
 	coreops "github.com/portworx/sched-ops/k8s/core"
 	"github.com/stretchr/testify/require"
+	v1 "k8s.io/api/core/v1"
 	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
 	fakeextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/fake"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	fakek8sclient "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func TestRegisterCRD(t *testing.T) {
@@ -137,5 +144,132 @@ func TestRegisterCRDShouldRemoveNodeStatusCRD(t *testing.T) {
 	require.Len(t, crds.Items, 1)
 	for _, crd := range crds.Items {
 		require.NotEqual(t, nodeStatusCRDName, crd.Name)
+	}
+}
+
+func TestReconcile(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defaultQuantity, _ := resource.ParseQuantity("0")
+	testNS := "test-ns"
+	clusterName := "test-cluster"
+	cluster := &corev1alpha1.StorageCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      clusterName,
+			Namespace: testNS,
+		},
+	}
+
+	controllerKind := corev1alpha1.SchemeGroupVersion.WithKind("StorageCluster")
+	clusterRef := metav1.NewControllerRef(cluster, controllerKind)
+	testStorageNode := "node1"
+	testStoragelessNode := "node2"
+	storageNode := &corev1alpha1.StorageNode{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            testStorageNode,
+			Namespace:       cluster.Namespace,
+			OwnerReferences: []metav1.OwnerReference{*clusterRef},
+		},
+		Status: corev1alpha1.NodeStatus{
+			Phase: string(corev1alpha1.NodeInitStatus),
+			Storage: corev1alpha1.StorageStatus{
+				TotalSize: *resource.NewQuantity(20971520, resource.BinarySI),
+				UsedSize:  *resource.NewQuantity(10971520, resource.BinarySI),
+			},
+			Conditions: []corev1alpha1.NodeCondition{
+				{
+					Type:   corev1alpha1.NodeStateCondition,
+					Status: corev1alpha1.NodeOnlineStatus,
+				},
+			},
+		},
+	}
+
+	storageLessNode := &corev1alpha1.StorageNode{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            testStoragelessNode,
+			Namespace:       cluster.Namespace,
+			OwnerReferences: []metav1.OwnerReference{*clusterRef},
+		},
+		Status: corev1alpha1.NodeStatus{
+			Phase: string(corev1alpha1.NodeInitStatus),
+			Storage: corev1alpha1.StorageStatus{
+				TotalSize: defaultQuantity,
+				UsedSize:  defaultQuantity,
+			},
+			Conditions: []corev1alpha1.NodeCondition{
+				{
+					Type:   corev1alpha1.NodeStateCondition,
+					Status: corev1alpha1.NodeOnlineStatus,
+				},
+			},
+		},
+	}
+
+	k8sClient := testutil.FakeK8sClient(storageNode, storageLessNode, cluster)
+	recorder := record.NewFakeRecorder(10)
+	driver := testutil.MockDriver(mockCtrl)
+	driver.EXPECT().GetSelectorLabels().Return(nil).AnyTimes()
+
+	// reconcile storage node
+	podNode1 := createStoragePod(cluster, "pod-node1", testStorageNode, nil, clusterRef)
+	k8sClient.Create(context.TODO(), podNode1)
+
+	podNode2 := createStoragePod(cluster, "pod-node2", testStoragelessNode, nil, clusterRef)
+	k8sClient.Create(context.TODO(), podNode2)
+
+	controller := Controller{
+		client:   k8sClient,
+		recorder: recorder,
+		Driver:   driver,
+	}
+
+	request := reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      testStorageNode,
+			Namespace: testNS,
+		},
+	}
+	result, err := controller.Reconcile(request)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// reconcile storageless node
+	request = reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      testStoragelessNode,
+			Namespace: testNS,
+		},
+	}
+	result, err = controller.Reconcile(request)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// reconcile non-existing node
+	request = reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      "no-such-node",
+			Namespace: testNS,
+		},
+	}
+	_, err = controller.Reconcile(request)
+	require.NoError(t, err)
+}
+
+func createStoragePod(
+	cluster *corev1alpha1.StorageCluster,
+	podName, nodeName string,
+	labels map[string]string,
+	clusterRef *metav1.OwnerReference,
+) *v1.Pod {
+	return &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            podName,
+			Namespace:       cluster.Namespace,
+			Labels:          labels,
+			OwnerReferences: []metav1.OwnerReference{*clusterRef},
+		},
+		Spec: v1.PodSpec{
+			NodeName: nodeName,
+		},
 	}
 }

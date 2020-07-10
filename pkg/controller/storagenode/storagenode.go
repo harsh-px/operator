@@ -174,6 +174,9 @@ func (c *Controller) syncStorageNode(storagenode *corev1alpha1.StorageNode) erro
 			if canNodeServeStorage(storagenode) { // node has storage
 				// ensure pod does not have the storage=true label
 				if value != storagePodLabelValue {
+					if podCopy.Labels == nil {
+						podCopy.Labels = make(map[string]string)
+					}
 					podCopy.Labels[storagePodLabelKey] = storagePodLabelValue
 					updateNeeded = true
 				}
