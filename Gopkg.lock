@@ -525,10 +525,11 @@
 
 [[projects]]
   branch = "bootstrap-schema"
-  digest = "1:317391e15a988cd6f9fadd2e73ad00de7b5d0fb771eb33431093c276470f4ac1"
+  digest = "1:cd052dd6bf1ad5aacdec40fa98f3e6d0160dc5c241ac5c6215b63910d994d86c"
   name = "github.com/portworx/kvdb"
   packages = [
     ".",
+    "api/bootstrap",
     "api/bootstrap/k8s",
     "common",
     "consul",
@@ -1493,6 +1494,7 @@
     "github.com/libopenstorage/openstorage/pkg/grpcserver",
     "github.com/operator-framework/operator-sdk/pkg/metrics",
     "github.com/portworx/kvdb",
+    "github.com/portworx/kvdb/api/bootstrap",
     "github.com/portworx/kvdb/api/bootstrap/k8s",
     "github.com/portworx/kvdb/consul",
     "github.com/portworx/kvdb/etcd/v2",
