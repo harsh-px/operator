@@ -116,6 +116,8 @@ const (
 	NodeInitCondition NodeConditionType = "NodeInit"
 	// NodeStateCondition is used for overall state of the node
 	NodeStateCondition NodeConditionType = "NodeState"
+	// NodeKVDBCondition is used for the KVDB condition on the node if it is part of an internal KVDB cluster
+	NodeKVDBCondition NodeConditionType = "NodeKVDB"
 )
 
 // NodeConditionStatus is the enum type for node condition statuses
