@@ -5,10 +5,16 @@ endif
 all: test
 
 deps:
-	dep ensure -v
+	go get -d -v ./...
 
 updatedeps:
-	dep ensure -update -v
+	go get -d -v -u -f ./...
+
+testdeps:
+	go get -d -v -t ./...
+
+updatetestdeps:
+	go get -d -v -t -u -f ./...
 
 build: deps
 	go build ./...
@@ -16,7 +22,7 @@ build: deps
 install: deps
 	go install ./...
 
-lint:
+lint: testdeps
 	go get -v github.com/golang/lint/golint
 	for file in $$(find . -name '*.go' | grep -v '\.pb\.go' | grep -v '\.pb\.gw\.go'); do \
 		golint $${file}; \
@@ -25,20 +31,18 @@ lint:
 		fi; \
 	done
 
-vet:
+vet: testdeps
 	go vet ./...
 
-errcheck:
+errcheck: testdeps
 	go get -v github.com/kisielk/errcheck
 	errcheck \
 		github.com/portworx/kvdb \
 		github.com/portworx/kvdb/common \
 		github.com/portworx/kvdb/consul \
-		github.com/portworx/kvdb/mem \
-		github.com/portworx/kvdb/wrappers \
-		github.com/portworx/kvdb/zookeeper
+		github.com/portworx/kvdb/mem
 
-pretest: deps errcheck lint vet
+pretest: errcheck lint vet
 
 gotest:
 	for pkg in $(PKGS); \
@@ -56,7 +60,7 @@ docker-build-kvdb-dev:
 	docker build -t portworx/kvdb:test_container -f $(GOPATH)/src/github.com/portworx/kvdb/Dockerfile.kvdb .
 
 docker-test:
-	docker run --rm \
+	docker run \
 		-v $(GOPATH)/src/github.com/portworx/kvdb:/go/src/github.com/portworx/kvdb \
 		portworx/kvdb:test_container \
 		make gotest
@@ -68,6 +72,8 @@ clean:
 	all \
 	deps \
 	updatedeps \
+	testdeps \
+	updatetestdeps \
 	build \
 	install \
 	lint \

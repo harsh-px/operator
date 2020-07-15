@@ -115,7 +115,7 @@ func New(
 ) (kvdb.Kvdb, error) {
 
 	// check for unsupported options
-	for _, opt := range []string{kvdb.UsernameKey, kvdb.PasswordKey} {
+	for _, opt := range []string{kvdb.UsernameKey, kvdb.PasswordKey, kvdb.CAFileKey} {
 		// Check if username provided
 		if _, ok := options[opt]; ok {
 			return nil, kvdb.ErrAuthNotSupported
@@ -600,10 +600,8 @@ func (kv *consulKV) Unlock(kvp *kvdb.KVPair) error {
 		return fmt.Errorf("Invalid lock structure for key: %v", string(kvp.Key))
 	}
 	_, err := kv.Delete(kvp.Key)
-
-	if err == nil || isConsulErrNeedingRetry(err) {
+	if err == nil {
 		_ = l.lock.Unlock()
-		// stop refreshing the lock, this will automatically release the lock
 		if l.doneCh != nil {
 			close(l.doneCh)
 		}
@@ -618,14 +616,7 @@ func (kv *consulKV) TxNew() (kvdb.Tx, error) {
 	return nil, kvdb.ErrNotSupported
 }
 
-func (kv *consulKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uint64, error) {
-	if len(prefixes) == 0 {
-		prefixes = []string{""}
-	} else {
-		prefixes = append(prefixes, bootstrap)
-		prefixes = common.PrunePrefixes(prefixes)
-	}
-
+func (kv *consulKV) Snapshot(prefix string) (kvdb.Kvdb, uint64, error) {
 	// Create a new bootstrap key : lowest index
 	r := rand.New(rand.NewSource(time.Now().UnixNano())).Int63()
 	bootStrapKeyLow := bootstrap + strconv.FormatInt(r, 10) +
@@ -643,22 +634,15 @@ func (kv *consulKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uin
 		RequireConsistent: true,
 	}
 
-	var (
-		kvPairs kvdb.KVPairs
-	)
-	for _, prefix := range prefixes {
-		listKey := kv.domain + prefix
-		listKey = stripConsecutiveForwardslash(listKey)
+	listKey := kv.domain + prefix
+	listKey = stripConsecutiveForwardslash(listKey)
 
-		pairs, _, err := kv.client.List(listKey, options)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		kvps := kv.pairToKvs("enumerate", pairs, nil)
-		kvPairs = append(kvPairs, kvps...)
+	pairs, _, err := kv.client.List(listKey, options)
+	if err != nil {
+		return nil, 0, err
 	}
 
+	kvPairs := kv.pairToKvs("enumerate", pairs, nil)
 	snapDb, err := mem.New(
 		kv.domain,
 		nil,
@@ -674,12 +658,6 @@ func (kv *consulKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uin
 		if err != nil {
 			return nil, 0, fmt.Errorf("Failed creating snap: %v", err)
 		}
-	}
-
-	if !consistent {
-		// A consistent snapshot is not required
-		// return all the enumerated keys
-		return snapDb, 0, nil
 	}
 
 	// Create bootrap key : highest index
@@ -711,7 +689,7 @@ func (kv *consulKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uin
 			var watchErr error
 			var sendErr error
 			var m *sync.Mutex
-			var found, ok bool
+			ok := false
 
 			if err != nil {
 				if err == kvdb.ErrWatchStopped && watchClosed {
@@ -734,17 +712,6 @@ func (kv *consulKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uin
 				watchErr = fmt.Errorf("Failed to get mutex")
 				sendErr = watchErr
 				goto errordone
-			}
-
-			for _, prefix := range prefixes {
-				if strings.HasPrefix(kvp.Key, prefix) {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				return nil
 			}
 
 			m.Lock()
@@ -837,14 +804,6 @@ func (kv *consulKV) EnumerateWithSelect(
 	enumerateSelect kvdb.EnumerateSelect,
 	copySelect kvdb.CopySelect,
 ) ([]interface{}, error) {
-	return nil, kvdb.ErrNotSupported
-}
-
-func (kv *consulKV) EnumerateKVPWithSelect(
-	prefix string,
-	enumerateSelect kvdb.EnumerateKVPSelect,
-	copySelect kvdb.CopyKVPSelect,
-) (kvdb.KVPairs, error) {
 	return nil, kvdb.ErrNotSupported
 }
 

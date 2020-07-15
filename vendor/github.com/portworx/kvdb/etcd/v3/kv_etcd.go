@@ -24,10 +24,9 @@ import (
 
 const (
 	// Name is the name of this kvdb implementation.
-	Name                       = "etcdv3-kv"
-	defaultKvRequestTimeout    = 10 * time.Second
-	defaultLeaseRequestTimeout = 2 * time.Second
-	defaultMaintenanceTimeout  = 7 * time.Second
+	Name                      = "etcdv3-kv"
+	defaultKvRequestTimeout   = 10 * time.Second
+	defaultMaintenanceTimeout = 7 * time.Second
 	// defaultDefragTimeout in seconds is the timeout for defrag to complete
 	defaultDefragTimeout = 30
 	// defaultSessionTimeout in seconds is used for etcd watch
@@ -75,10 +74,6 @@ func (w *watchQ) enqueue(key string, kvp *kvdb.KVPair, err error) bool {
 	return !w.done
 }
 
-func isWatchClosedError(err error) bool {
-	return err == kvdb.ErrWatchRevisionCompacted || err == kvdb.ErrWatchStopped
-}
-
 func (w *watchQ) start() {
 	for {
 		key, kvp, err := w.q.Dequeue()
@@ -86,7 +81,7 @@ func (w *watchQ) start() {
 		if err != nil {
 			w.done = true
 			logrus.Infof("Watch cb for key %v returned err: %v", key, err)
-			if !isWatchClosedError(err) {
+			if err != kvdb.ErrWatchStopped {
 				// The caller returned an error. Indicate the caller
 				// that the watch has been stopped
 				_ = w.cb(key, w.opaque, nil, kvdb.ErrWatchStopped)
@@ -108,7 +103,7 @@ type etcdKV struct {
 	common.BaseKvdb
 	kvClient          *e.Client
 	authClient        e.Auth
-	maintenanceClient *e.Client
+	maintenanceClient e.Maintenance
 	domain            string
 	ec.EtcdCommon
 }
@@ -149,23 +144,7 @@ func New(
 	}
 	kvClient, err := e.New(cfg)
 	if err != nil {
-		if len(tls.CAFile) > 0 || len(tls.CertFile) > 0 {
-			// With secure etcd cluster, etcd client has a bug
-			// where it fails to connect to the etcd cluster if
-			// first endpoint in the list is down.
-			// Shuffle the list of IPs and try again
-			for i := 0; i < len(cfg.Endpoints); i++ {
-				endpoints := rotateEndpointsByOne(cfg.Endpoints)
-				cfg.Endpoints = endpoints
-				kvClient, err = e.New(cfg)
-				if err == nil {
-					break
-				}
-			}
-		}
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	// Creating a separate client for maintenance APIs. Currently the maintenance client
 	// is only used for the Status API, to fetch the endpoint status. However if the Status
@@ -189,7 +168,7 @@ func New(
 		common.BaseKvdb{FatalCb: fatalErrorCb},
 		kvClient,
 		e.NewAuth(kvClient),
-		mClient,
+		e.NewMaintenance(mClient),
 		domain,
 		etcdCommon,
 	}, nil
@@ -205,10 +184,6 @@ func (et *etcdKV) Capabilities() int {
 
 func (et *etcdKV) Context() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), defaultKvRequestTimeout)
-}
-
-func (et *etcdKV) LeaseContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), defaultLeaseRequestTimeout)
 }
 
 func (et *etcdKV) MaintenanceContextWithLeader() (context.Context, context.CancelFunc) {
@@ -509,20 +484,22 @@ func (et *etcdKV) CompareAndSet(
 		txnErr, err error
 	)
 	key := et.domain + kvp.Key
+
+	opts := []e.OpOption{}
+	if (flags & kvdb.KVTTL) != 0 {
+		leaseResult, err = et.getLeaseWithRetries(key, kvp.TTL)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, e.WithLease(leaseResult.ID))
+	}
+
 	cmp := e.Compare(e.Value(key), "=", string(prevValue))
 	if (flags & kvdb.KVModifiedIndex) != 0 {
 		cmp = e.Compare(e.ModRevision(key), "=", int64(kvp.ModifiedIndex))
 	}
 
 	for i := 0; i < timeoutMaxRetry; i++ {
-		opts := []e.OpOption{}
-		if (flags & kvdb.KVTTL) != 0 {
-			leaseResult, err = et.getLeaseWithRetries(key, kvp.TTL)
-			if err != nil {
-				return nil, err
-			}
-			opts = append(opts, e.WithLease(leaseResult.ID))
-		}
 		ctx, cancel := et.Context()
 		txnResponse, txnErr = et.kvClient.Txn(ctx).
 			If(cmp).
@@ -546,8 +523,7 @@ func (et *etcdKV) CompareAndSet(
 			if kvPair.ModifiedIndex == kvp.ModifiedIndex {
 				// update did not succeed, retry
 				if i == (timeoutMaxRetry - 1) {
-					et.FatalCb(kvdb.ErrNoConnection, "Too many server retries for CAS: %v", *kvp)
-					return nil, txnErr
+					et.FatalCb("Too many server retries for CAS: %v", *kvp)
 				}
 				continue
 			} else if bytes.Compare(kvp.Value, kvPair.Value) == 0 {
@@ -620,8 +596,7 @@ func (et *etcdKV) CompareAndDelete(
 				return nil, txnErr
 			}
 			if i == (timeoutMaxRetry - 1) {
-				et.FatalCb(kvdb.ErrNoConnection, "Too many server retries for CAD: %v", *kvp)
-				return nil, txnErr
+				et.FatalCb("Too many server retries for CAD: %v", *kvp)
 			}
 			continue
 		}
@@ -707,7 +682,7 @@ func (et *etcdKV) LockWithTimeout(
 		return nil, err
 	}
 	kvPair.TTL = int64(ttl)
-	kvPair.Lock = &ec.EtcdLock{Done: make(chan struct{}), AcquisitionTime: time.Now()}
+	kvPair.Lock = &ec.EtcdLock{Done: make(chan struct{})}
 	go et.refreshLock(kvPair, lockerID, lockHoldDuration)
 	return kvPair, err
 }
@@ -720,20 +695,10 @@ func (et *etcdKV) Unlock(kvp *kvdb.KVPair) error {
 	l.Lock()
 	// Don't modify kvp here, CompareAndDelete does that.
 	_, err := et.CompareAndDelete(kvp, kvdb.KVFlags(0))
-	connectionError := false
-	if err != nil {
-		connectionError, _ = isRetryNeeded(err, "Unlock", kvp.Key, 300)
-	}
-	if err == nil || connectionError {
+	if err == nil {
 		l.Unlocked = true
-		closeChan := l.Err == nil
 		l.Unlock()
-		// stopping lock refresh will automatically release
-		// the lock, so even if we have connection errors we don't
-		// need to report error.
-		if closeChan {
-			l.Done <- struct{}{}
-		}
+		l.Done <- struct{}{}
 		return nil
 	}
 	l.Unlock()
@@ -902,10 +867,11 @@ func (et *etcdKV) refreshLock(
 				)
 				currentRefresh = time.Now()
 				if err != nil {
-					et.FatalCb(kvdb.ErrLockRefreshFailed,
-						"Error refreshing lock. [Tag %v] [Err: %v] [Acquisition Time: %v]"+
-							" [Current Refresh: %v] [Previous Refresh: %v] [Modified Index: %v]",
-						lockMsgString, err, l.AcquisitionTime, currentRefresh, prevRefresh, kvPair.ModifiedIndex,
+					et.FatalCb(
+						"Error refreshing lock. [Tag %v] [Err: %v]"+
+							" [Current Refresh: %v] [Previous Refresh: %v]"+
+							" [Modified Index: %v]",
+						lockMsgString, err, currentRefresh, prevRefresh, kvPair.ModifiedIndex,
 					)
 					l.Err = err
 					l.Unlock()
@@ -974,13 +940,10 @@ func (et *etcdKV) watchStart(
 				continue
 			}
 			if wresp.Canceled == true {
-				logrus.Errorf("Watch on key %v cancelled. Error: %v %v", key,
+				// Watch is canceled. Notify the watcher
+				logrus.Errorf("Watch on key %v cancelled. Error: %v", key,
 					wresp.Err())
-				retError := kvdb.ErrWatchStopped
-				if strings.Contains(rpctypes.ErrGRPCCompacted.Error(), wresp.Err().Error()) {
-					retError = kvdb.ErrWatchRevisionCompacted
-				}
-				watchQ.enqueue(key, nil, retError)
+				watchQ.enqueue(key, nil, kvdb.ErrWatchStopped)
 				return
 			} else {
 				for _, ev := range wresp.Events {
@@ -1033,25 +996,13 @@ func (et *etcdKV) watchStart(
 	}
 }
 
-func (et *etcdKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uint64, error) {
-	if len(prefixes) == 0 {
-		prefixes = []string{""}
-	} else {
-		prefixes = append(prefixes, ec.Bootstrap)
-		prefixes = common.PrunePrefixes(prefixes)
-	}
+func (et *etcdKV) Snapshot(prefix string) (kvdb.Kvdb, uint64, error) {
 	// Create a new bootstrap key
+	var updates []*kvdb.KVPair
 	watchClosed := false
-	var (
-		lowestKvdbIndex, highestKvdbIndex uint64
-		bootStrapKeyLow, bootStrapKeyHigh string
-		r                                 int64
-		updates                           []*kvdb.KVPair
-	)
+	var lowestKvdbIndex, highestKvdbIndex uint64
 	done := make(chan error)
 	mutex := &sync.Mutex{}
-
-	// watch callback function
 	cb := func(
 		prefix string,
 		opaque interface{},
@@ -1090,18 +1041,14 @@ func (et *etcdKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uint6
 
 		m.Lock()
 		defer m.Unlock()
-		for _, configuredPrefix := range prefixes {
-			if strings.HasPrefix(kvp.Key, configuredPrefix) {
-				updates = append(updates, kvp)
-				if highestKvdbIndex > 0 && kvp.ModifiedIndex >= highestKvdbIndex {
-					// Done applying changes.
-					watchClosed = true
-					watchErr = fmt.Errorf("done")
-					sendErr = nil
-					goto errordone
-				}
-				break
-			}
+		updates = append(updates, kvp)
+		if highestKvdbIndex > 0 && kvp.ModifiedIndex >= highestKvdbIndex {
+			// Done applying changes.
+			logrus.Infof("Snapshot complete")
+			watchClosed = true
+			watchErr = fmt.Errorf("done")
+			sendErr = nil
+			goto errordone
 		}
 
 		return nil
@@ -1110,23 +1057,25 @@ func (et *etcdKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uint6
 		return watchErr
 	}
 
-	if consistent {
-		// For a consistent snapshot, start a watch to track updates
-		// happening until we enumerate all the keys
-		if err := et.WatchTree("", 0, mutex, cb); err != nil {
-			return nil, 0, fmt.Errorf("Failed to start watch: %v", err)
-		}
-		r = rand.New(rand.NewSource(time.Now().UnixNano())).Int63()
-		bootStrapKeyLow = ec.Bootstrap + strconv.FormatInt(r, 10) +
-			strconv.FormatInt(time.Now().UnixNano(), 10)
-		kvPair, err := et.Put(bootStrapKeyLow, time.Now().UnixNano(), 0)
-		if err != nil {
-			return nil, 0, fmt.Errorf("Failed to create snap bootstrap key %v, "+
-				"err: %v", bootStrapKeyLow, err)
-		}
-		lowestKvdbIndex = kvPair.ModifiedIndex
+	if err := et.WatchTree("", 0, mutex, cb); err != nil {
+		return nil, 0, fmt.Errorf("Failed to start watch: %v", err)
 	}
 
+	r := rand.New(rand.NewSource(time.Now().UnixNano())).Int63()
+	bootStrapKeyLow := ec.Bootstrap + strconv.FormatInt(r, 10) +
+		strconv.FormatInt(time.Now().UnixNano(), 10)
+	kvPair, err := et.Put(bootStrapKeyLow, time.Now().UnixNano(), 0)
+	if err != nil {
+		return nil, 0, fmt.Errorf("Failed to create snap bootstrap key %v, "+
+			"err: %v", bootStrapKeyLow, err)
+	}
+	lowestKvdbIndex = kvPair.ModifiedIndex
+
+	kvPairs, err := et.Enumerate(prefix)
+	if err != nil {
+		return nil, 0, fmt.Errorf("Failed to enumerate %v: err: %v", prefix,
+			err)
+	}
 	snapDb, err := mem.New(
 		et.domain,
 		nil,
@@ -1137,73 +1086,48 @@ func (et *etcdKV) Snapshot(prefixes []string, consistent bool) (kvdb.Kvdb, uint6
 		return nil, 0, fmt.Errorf("Failed to create in-mem kv store: %v", err)
 	}
 
-	// enumerate prefix function
-	enumeratePrefix := func(snapDb kvdb.Kvdb, prefix string) error {
-		kvPairs, err := et.Enumerate(prefix)
-		if err != nil {
-			return fmt.Errorf("Failed to enumerate %v: err: %v", prefix,
-				err)
-		}
-
-		for i := 0; i < len(kvPairs); i++ {
-			kvPair := kvPairs[i]
-			if len(kvPair.Value) > 0 {
-				// Only create a leaf node
+	for i := 0; i < len(kvPairs); i++ {
+		kvPair := kvPairs[i]
+		if len(kvPair.Value) > 0 {
+			// Only create a leaf node
+			_, err := snapDb.SnapPut(kvPair)
+			if err != nil {
+				return nil, 0, fmt.Errorf("Failed creating snap: %v", err)
+			}
+		} else {
+			newKvPairs, err := et.Enumerate(kvPair.Key)
+			if err != nil {
+				return nil, 0, fmt.Errorf("Failed to get child keys: %v", err)
+			}
+			if len(newKvPairs) == 0 {
+				// empty value for this key
 				_, err := snapDb.SnapPut(kvPair)
 				if err != nil {
-					return fmt.Errorf("Failed creating snap: %v", err)
+					return nil, 0, fmt.Errorf("Failed creating snap: %v", err)
+				}
+			} else if len(newKvPairs) == 1 {
+				// empty value for this key
+				_, err := snapDb.SnapPut(newKvPairs[0])
+				if err != nil {
+					return nil, 0, fmt.Errorf("Failed creating snap: %v", err)
 				}
 			} else {
-				newKvPairs, err := et.Enumerate(kvPair.Key)
-				if err != nil {
-					return fmt.Errorf("Failed to get child keys: %v", err)
-				}
-				if len(newKvPairs) == 0 {
-					// empty value for this key
-					_, err := snapDb.SnapPut(kvPair)
-					if err != nil {
-						return fmt.Errorf("Failed creating snap: %v", err)
-					}
-				} else if len(newKvPairs) == 1 {
-					// empty value for this key
-					_, err := snapDb.SnapPut(newKvPairs[0])
-					if err != nil {
-						return fmt.Errorf("Failed creating snap: %v", err)
-					}
-				} else {
-					kvPairs = append(kvPairs, newKvPairs...)
-				}
+				kvPairs = append(kvPairs, newKvPairs...)
 			}
 		}
-		return nil
 	}
 
-	// Enumerate all configured prefixes
-	for _, prefix := range prefixes {
-		if err := enumeratePrefix(snapDb, prefix); err != nil {
-			return nil, 0, err
-		}
-	}
-
-	if !consistent {
-		// A consistent snapshot is not required
-		// return all the enumerated keys
-		return snapDb, 0, nil
-	}
-
-	// take the lock before we Put a key so that
-	// the highestKvdbIndex will be set before the watch callback is invoked
-	mutex.Lock()
 	// Create bootrap key : highest index
-
-	bootStrapKeyHigh = ec.Bootstrap + strconv.FormatInt(r, 10) +
+	bootStrapKeyHigh := ec.Bootstrap + strconv.FormatInt(r, 10) +
 		strconv.FormatInt(time.Now().UnixNano(), 10)
-	kvPair, err := et.Put(bootStrapKeyHigh, time.Now().UnixNano(), 0)
+	kvPair, err = et.Put(bootStrapKeyHigh, time.Now().UnixNano(), 0)
 	if err != nil {
 		return nil, 0, fmt.Errorf("Failed to create snap bootstrap key %v, "+
 			"err: %v", bootStrapKeyHigh, err)
 	}
 
+	mutex.Lock()
+	// not sure if we need a lock, but couldnt find any doc which says its ok
 	highestKvdbIndex = kvPair.ModifiedIndex
 	mutex.Unlock()
 
@@ -1253,14 +1177,6 @@ func (et *etcdKV) EnumerateWithSelect(
 	enumerateSelect kvdb.EnumerateSelect,
 	copySelect kvdb.CopySelect,
 ) ([]interface{}, error) {
-	return nil, kvdb.ErrNotSupported
-}
-
-func (et *etcdKV) EnumerateKVPWithSelect(
-	prefix string,
-	enumerateSelect kvdb.EnumerateKVPSelect,
-	copySelect kvdb.CopyKVPSelect,
-) (kvdb.KVPairs, error) {
 	return nil, kvdb.ErrNotSupported
 }
 
@@ -1414,7 +1330,6 @@ func (et *etcdKV) RemoveMember(
 	nodeName string,
 	nodeIP string,
 ) error {
-	fn := "RemoveMember"
 	ctx, cancel := et.MaintenanceContextWithLeader()
 	memberListResponse, err := et.kvClient.MemberList(ctx)
 	cancel()
@@ -1444,32 +1359,11 @@ func (et *etcdKV) RemoveMember(
 		}
 	}
 	et.kvClient.SetEndpoints(newClientUrls...)
-	et.maintenanceClient.SetEndpoints(newClientUrls...)
-	removeMemberRetries := 5
-	for i := 0; i < removeMemberRetries; i++ {
-		ctx, cancel = et.MaintenanceContextWithLeader()
-		_, err := et.kvClient.MemberRemove(ctx, removeMemberID)
-		cancel()
-
-		if err != nil {
-			// Check if the error is member not found
-			etcdErr, ok := err.(rpctypes.EtcdError)
-			if ok && etcdErr == rpctypes.ErrMemberNotFound {
-				return nil
-			}
-			// Check if we need to retry
-			retry, err := isRetryNeeded(err, fn, nodeName, i)
-			if !retry {
-				// For all others return immediately
-				return err
-			}
-			if i == (removeMemberRetries - 1) {
-				return fmt.Errorf("Too many retries for RemoveMember: %v %v", nodeName, nodeIP)
-			}
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		break
+	ctx, cancel = et.MaintenanceContextWithLeader()
+	_, err = et.kvClient.MemberRemove(ctx, removeMemberID)
+	cancel()
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -1540,7 +1434,6 @@ func (et *etcdKV) Deserialize(b []byte) (kvdb.KVPairs, error) {
 
 func (et *etcdKV) SetEndpoints(endpoints []string) error {
 	et.kvClient.SetEndpoints(endpoints...)
-	et.maintenanceClient.SetEndpoints(endpoints...)
 	return nil
 }
 
@@ -1580,7 +1473,7 @@ func (et *etcdKV) getLeaseWithRetries(key string, ttl int64) (*e.LeaseGrantRespo
 		retry       bool
 	)
 	for i := 0; i < timeoutMaxRetry; i++ {
-		leaseCtx, leaseCancel := et.LeaseContext()
+		leaseCtx, leaseCancel := et.Context()
 		leaseResult, leaseErr = et.kvClient.Grant(leaseCtx, ttl)
 		leaseCancel()
 		if leaseErr != nil {
@@ -1626,9 +1519,4 @@ func isRetryNeeded(err error, fn string, key string, retryCount int) (bool, erro
 		logrus.Errorf("[%v: %v] kvdb error: %v, retry count %v \n", fn, key, err, retryCount)
 		return true, err
 	}
-}
-
-func rotateEndpointsByOne(endpoints []string) []string {
-	copy(endpoints, append(endpoints[len(endpoints)-1:], endpoints[:len(endpoints)-1]...))
-	return endpoints
 }
