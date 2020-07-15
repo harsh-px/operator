@@ -42,7 +42,7 @@
   version = "v3.0.0"
 
 [[projects]]
-  digest = "1:69041137ce94729d94716fec468951c9d4b5a2e3499fd13d37b0d96916eb0aa6"
+  digest = "1:806b74f524325e0a8a338ebaa354a67334ed0419cb294a6ac9b2a83df584d967"
   name = "github.com/coreos/etcd"
   packages = [
     "auth/authpb",
@@ -60,8 +60,8 @@
     "version",
   ]
   pruneopts = "UT"
-  revision = "28f3f26c0e303392556035b694f75768d449d33d"
-  version = "v3.3.1"
+  revision = "98d308426819d892e149fe45f6fd542464cb1f9d"
+  version = "v3.3.13"
 
 [[projects]]
   digest = "1:f6e5e1bc64c2908167e6aa9a1fe0c084d515132a1c63ad5b6c84036aa06dc0c1"
@@ -130,14 +130,6 @@
   ]
   pruneopts = "UT"
   revision = "6480d4af844c189cf5dd913db24ddd339d3a4f85"
-
-[[projects]]
-  digest = "1:6f9339c912bbdda81302633ad7e99a28dfa5a639c864061f1929510a9a64aa74"
-  name = "github.com/dustin/go-humanize"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "9f541cc9db5d55bce703bd99987c9d5cb8eea45e"
-  version = "v1.0.0"
 
 [[projects]]
   digest = "1:b2754ad67d4ed5a0741d69396c6f5cbe1e426a8adc2e8e97e09a1ee5a4621653"
@@ -524,8 +516,8 @@
   version = "v1.0.0"
 
 [[projects]]
-  branch = "bootstrap-schema"
-  digest = "1:cd052dd6bf1ad5aacdec40fa98f3e6d0160dc5c241ac5c6215b63910d994d86c"
+  branch = "bootstrap-schema-2"
+  digest = "1:6147a1552014f7a788f93106825c1d2f7ab35ac723f7deaf2235484b44389397"
   name = "github.com/portworx/kvdb"
   packages = [
     ".",
@@ -539,7 +531,7 @@
     "mem",
   ]
   pruneopts = "UT"
-  revision = "ee937c3e214afd6d06b0c62036ba467f1a1db3e8"
+  revision = "6145547fb934c9012333ded17d858e4edde62b8a"
 
 [[projects]]
   branch = "master"
@@ -641,14 +633,6 @@
   pruneopts = "UT"
   revision = "ffdc059bfe9ce6a4e144ba849dbedead332c6053"
   version = "v1.3.0"
-
-[[projects]]
-  digest = "1:5a1cf4e370bc86137b58da2ae065e76526d32b11f62a7665f36dbd5f41fa95ff"
-  name = "github.com/ugorji/go"
-  packages = ["codec"]
-  pruneopts = "UT"
-  revision = "23ab95ef5dc3b70286760af84ce2327a2b64ed62"
-  version = "v1.1.7"
 
 [[projects]]
   digest = "1:b24d38b282bacf9791408a080f606370efa3d364e4b5fd9ba0f7b87786d3b679"
