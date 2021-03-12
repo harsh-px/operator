@@ -35,7 +35,7 @@ const (
 	defaultPrometheusConfigMapReloadImage = "quay.io/coreos/configmap-reload:v0.0.1"
 	defaultPrometheusConfigReloaderImage  = "quay.io/coreos/prometheus-config-reloader:v0.34.0"
 	// TODO change this once phone home team is done uploading image
-	defaultTelemetryImage          = "harshpx/ccm-service:CLOUD-56552"
+	defaultTelemetryImage          = "harshpx/ccm-service:latest"
 	defaultManifestRefreshInterval = 3 * time.Hour
 )
 
