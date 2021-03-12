@@ -61,7 +61,7 @@ func (t *telemetry) MarkDeleted() {
 	t.isCreated = false
 }
 
-// RegisterPortworxCRDComponent registers the telemetry  component
+// RegisterTelemetryComponent registers the telemetry  component
 func RegisterTelemetryComponent() {
 	Register(TelemetryComponentName, &telemetry{})
 }

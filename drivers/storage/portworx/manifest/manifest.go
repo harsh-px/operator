@@ -34,7 +34,9 @@ const (
 	defaultPrometheusOperatorImage        = "quay.io/coreos/prometheus-operator:v0.34.0"
 	defaultPrometheusConfigMapReloadImage = "quay.io/coreos/configmap-reload:v0.0.1"
 	defaultPrometheusConfigReloaderImage  = "quay.io/coreos/prometheus-config-reloader:v0.34.0"
-	defaultManifestRefreshInterval        = 3 * time.Hour
+	// TODO change this once phone home team is done uploading image
+	defaultTelemetryImage          = "harshpx/ccm-service:CLOUD-56552"
+	defaultManifestRefreshInterval = 3 * time.Hour
 )
 
 var (
@@ -58,8 +60,7 @@ type Release struct {
 	PrometheusOperator        string `yaml:"prometheusOperator,omitempty"`
 	PrometheusConfigMapReload string `yaml:"prometheusConfigMapReload,omitempty"`
 	PrometheusConfigReloader  string `yaml:"prometheusConfigReloader,omitempty"`
-	// TODO figure out how this gets populated
-	Telemetry string `yaml:"telemetry,omitempty"`
+	Telemetry                 string `yaml:"telemetry,omitempty"`
 }
 
 // Version is the response structure from a versions source
@@ -175,6 +176,7 @@ func defaultRelease(
 			PrometheusOperator:        defaultPrometheusOperatorImage,
 			PrometheusConfigMapReload: defaultPrometheusConfigMapReloadImage,
 			PrometheusConfigReloader:  defaultPrometheusConfigReloaderImage,
+			Telemetry:                 defaultTelemetryImage,
 		},
 	}
 	fillCSIDefaults(rel, k8sVersion)
@@ -208,6 +210,10 @@ func fillDefaults(
 	}
 	if rel.Components.PrometheusConfigReloader == "" {
 		rel.Components.PrometheusConfigReloader = defaultPrometheusConfigReloaderImage
+	}
+
+	if rel.Components.Telemetry == "" {
+		rel.Components.Telemetry = defaultTelemetryImage
 	}
 	fillCSIDefaults(rel, k8sVersion)
 }
