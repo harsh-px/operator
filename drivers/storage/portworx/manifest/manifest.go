@@ -6,13 +6,14 @@ import (
 	"sync"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
+
 	version "github.com/hashicorp/go-version"
 	pxutil "github.com/libopenstorage/operator/drivers/storage/portworx/util"
 	corev1 "github.com/libopenstorage/operator/pkg/apis/core/v1"
 	"github.com/libopenstorage/operator/pkg/util"
 	k8sutil "github.com/libopenstorage/operator/pkg/util/k8s"
 	"github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -57,6 +58,8 @@ type Release struct {
 	PrometheusOperator        string `yaml:"prometheusOperator,omitempty"`
 	PrometheusConfigMapReload string `yaml:"prometheusConfigMapReload,omitempty"`
 	PrometheusConfigReloader  string `yaml:"prometheusConfigReloader,omitempty"`
+	// TODO figure out how this gets populated
+	Telemetry string `yaml:"telemetry,omitempty"`
 }
 
 // Version is the response structure from a versions source
